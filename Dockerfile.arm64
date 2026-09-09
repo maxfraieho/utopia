@@ -9,11 +9,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Placement of compiled aarch64 binary
-COPY target/aarch64-unknown-linux-gnu/release/utopia-server /usr/local/bin/utopia-server
+# Placement of compiled aarch64 binary from staging context
+COPY staging/utopia-server /usr/local/bin/utopia-server
 
 # Copy web dist
-COPY web/dist /app/web-dist
+COPY staging/web-dist /app/web-dist
 
 # Create non-root user
 RUN useradd -u 10001 -U -s /bin/sh utopia && \

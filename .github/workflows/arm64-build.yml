@@ -56,8 +56,12 @@ jobs:
           cargo zigbuild --release --target aarch64-unknown-linux-gnu.2.36 -p utopia-server
           file target/aarch64-unknown-linux-gnu/release/utopia-server
 
-      - name: Package standalone binary tarball
+      - name: Prepare staging context and release tarball
         run: |
+          mkdir -p staging
+          cp target/aarch64-unknown-linux-gnu/release/utopia-server staging/utopia-server
+          cp -r web/dist staging/web-dist
+
           mkdir -p release-artifacts
           tar -czf release-artifacts/utopia-server-linux-arm64.tar.gz -C target/aarch64-unknown-linux-gnu/release utopia-server
           sha256sum release-artifacts/utopia-server-linux-arm64.tar.gz > release-artifacts/utopia-server-linux-arm64.tar.gz.sha256
