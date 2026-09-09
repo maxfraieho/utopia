@@ -1,0 +1,100 @@
+name: Build ARM64 Utopia
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - dev
+      - main
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build-arm64:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install pnpm and build web
+        run: |
+          corepack enable
+          cd web
+          pnpm install --frozen-lockfile
+          pnpm build
+          cd ..
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-gnu
+
+      - name: Set up Python for cargo-zigbuild
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Zig and cargo-zigbuild
+        run: |
+          pip install cargo-zigbuild
+          ZIG_VERSION="0.13.0"
+          curl -sLo /tmp/zig.tar.xz "https://ziglang.org/download/${ZIG_VERSION}/zig-linux-x86_64-${ZIG_VERSION}.tar.xz"
+          tar -xf /tmp/zig.tar.xz -C /tmp
+          sudo mv "/tmp/zig-linux-x86_64-${ZIG_VERSION}" /usr/local/zig
+          sudo ln -sf /usr/local/zig/zig /usr/local/bin/zig
+          zig version
+          cargo zigbuild --version
+
+      - name: Build utopia-server for ARM64 (glibc 2.36)
+        run: |
+          cargo zigbuild --release --target aarch64-unknown-linux-gnu.2.36 -p utopia-server
+          file target/aarch64-unknown-linux-gnu/release/utopia-server
+
+      - name: Package standalone binary tarball
+        run: |
+          mkdir -p release-artifacts
+          tar -czf release-artifacts/utopia-server-linux-arm64.tar.gz -C target/aarch64-unknown-linux-gnu/release utopia-server
+          sha256sum release-artifacts/utopia-server-linux-arm64.tar.gz > release-artifacts/utopia-server-linux-arm64.tar.gz.sha256
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and Push ARM64 Docker Image
+        run: |
+          REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          docker buildx build \
+            --platform linux/arm64 \
+            -f Dockerfile.arm64 \
+            -t ghcr.io/${REPO_LOWER}:arm64 \
+            -t ghcr.io/${REPO_LOWER}:latest \
+            -t ghcr.io/${REPO_LOWER}:0.1.0-rc5 \
+            --push .
+
+      - name: Upload Binary Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: utopia-server-linux-arm64
+          path: release-artifacts/*
+
+      - name: Create or Update GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create v0.1.0-arm64 release-artifacts/* \
+            --title "Utopia v0.1.0-rc5 (ARM64)" \
+            --notes "Automated ARM64 build of Utopia for Google Pixel 7 (Podroid OS / Debian Bookworm). Target: aarch64-unknown-linux-gnu.2.36" \
+            --clobber || true
